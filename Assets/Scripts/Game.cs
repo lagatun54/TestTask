@@ -8,79 +8,62 @@ using UnityEngine.UI;
 public class Game : MonoBehaviour
 {
 	[Serializable]
-	public struct PlayerGame
+	public struct PlayerData
 	{
 		public string Username;
 		public string AvatarUrl;
 		public int Points;
-		public Sprite Icon;
 	}
-	[SerializeField] Sprite defaultIcon;
-
-	private PlayerGame[] _playerGames;
-	void Start ()
+	private const string UsersUrl= "https://dfu8aq28s73xi.cloudfront.net/testUsers";
+	
+	[SerializeField] private PlayerItem playerPrefab;
+	[SerializeField] private Texture2D defaultAvatar;
+	[SerializeField] private Texture2D loadingTexture;
+	IEnumerator Start ()
 	{
-		StartCoroutine (GetPlayer ());
-	}
-
-	void DrawUI ()
-	{
-		GameObject playerIcon = GameObject.FindGameObjectWithTag("Button");
-		GameObject instantiatePlayer;
-
-		var sorted = from playerGame in _playerGames
-			orderby playerGame.Points descending
-			select playerGame;
-		foreach (var p in sorted)
-		{
-			instantiatePlayer = Instantiate (playerIcon, transform);
-			instantiatePlayer.transform.GetChild (0).GetComponent <Image>().sprite = p.Icon;
-			instantiatePlayer.transform.GetChild (1).GetComponent <Text> ().text = p.Username;
-			instantiatePlayer.transform.GetChild (2).GetComponent <Text> ().text = p.Points.ToString();
-		}
-		Destroy (playerIcon);
-	}
-
-	private IEnumerator GetPlayer ()
-	{
-		string url = "https://dfu8aq28s73xi.cloudfront.net/testUsers";
-
-		UnityWebRequest request = UnityWebRequest.Get (url);
+		
+		var request = UnityWebRequest.Get(UsersUrl);
 		yield return request.SendWebRequest();
+		if (request.error != null)
+		{
+			Debug.LogWarning("No connection");
+			yield break;
+		}
 
-		if (request.error != null) {
-			//show message "no internet "
-			Debug.Log("No connection");
-		} else {
-			if (request.isDone) {
-				_playerGames = JsonHelper.JsonHelper.GetArray<PlayerGame> (request.downloadHandler.text);
-				StartCoroutine (GetPlayerIcons ());
-			}
+		if (request.isDone)
+		{
+			var list = JsonHelper.JsonHelper.GetArray<PlayerData>(request.downloadHandler.text);
+			Array.Sort(list, SortByScore);
+			foreach (var player in list)
+				AddPlayer(player);
 		}
 	}
 
-	private IEnumerator GetPlayerIcons ()
-	{
-		for (int i = 0; i < _playerGames.Length; i++) {
-			
-			UnityWebRequest request = UnityWebRequestTexture.GetTexture(_playerGames[i].AvatarUrl);
-			Debug.Log(_playerGames[i].AvatarUrl);
-			yield return request.SendWebRequest();
+	private int SortByScore(PlayerData data1, PlayerData data2) => data2.Points.CompareTo(data1.Points);
 
-			if (request.error != null) {
-				//error
-				//show default image
-				Debug.Log(request.error);
-				_playerGames[i].Icon = defaultIcon;
-			} 
-			else {
-				if (request.isDone)
-				{
-					Texture2D tx = ((DownloadHandlerTexture)request.downloadHandler).texture;
-					_playerGames[i].Icon = Sprite.Create(tx, new Rect(0,0, tx.width, tx.height), Vector2.zero);
-				}
-			}
+	private IEnumerator RequestAvatar(string url, PlayerItem player)
+	{
+		var request = UnityWebRequestTexture.GetTexture(url);
+		yield return request.SendWebRequest();
+		if (request.error != null)
+		{
+			Debug.LogWarning(request.error);
+			player.SetAvatar(defaultAvatar);
+			yield break;
 		}
-		DrawUI ();	
+
+		if (request.isDone)
+		{
+			var avatar = ((DownloadHandlerTexture)request.downloadHandler).texture;
+			player.SetAvatar(avatar);
+		}
+	}
+
+	private void AddPlayer(PlayerData data)
+	{
+		var player = Instantiate(playerPrefab, transform);
+		player.Init(data.Username, data.Points);
+		player.SetAvatar(loadingTexture);
+		StartCoroutine(RequestAvatar(data.AvatarUrl, player));
 	}
 }
